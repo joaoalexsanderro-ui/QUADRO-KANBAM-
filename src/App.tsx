@@ -10,7 +10,9 @@ import {
   createUserWithEmailAndPassword, 
   signOut, 
   onAuthStateChanged,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  GoogleAuthProvider,
+  signInWithPopup
 } from 'firebase/auth';
 import { 
   collection, 
@@ -147,6 +149,7 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
+        localStorage.setItem('kanban_token', firebaseUser.uid);
         setToken(firebaseUser.uid);
         setUser({
           id: firebaseUser.uid,
@@ -298,10 +301,10 @@ export default function App() {
     setAuthError(null);
     setAuthSuccessMessage(null);
     
-    const email = usernameInput.trim().toLowerCase();
-    const password = passwordInput;
+    const emailInputRaw = usernameInput.trim();
+    const passwordInputRaw = passwordInput;
 
-    if (!email || !password) {
+    if (!emailInputRaw || !passwordInputRaw) {
       setAuthError('Preencha seu e-mail de usuário e senha de acesso!');
       return;
     }
@@ -309,14 +312,44 @@ export default function App() {
     try {
       setIsAuthLoading(true);
       if (isRegistering) {
-        if (password.length < 6) {
+        const signupEmail = emailInputRaw.toLowerCase();
+        const signupPassword = passwordInputRaw.trim();
+        if (signupPassword.length < 6) {
           setAuthError('A senha precisa ter pelo menos 6 caracteres.');
           setIsAuthLoading(false);
           return;
         }
-        await createUserWithEmailAndPassword(auth, email, password);
+        await createUserWithEmailAndPassword(auth, signupEmail, signupPassword);
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        // Prepare combinations to support any legacy VPS or trimmed/untrimmed registration
+        const attempts = [
+          { email: emailInputRaw.toLowerCase(), password: passwordInputRaw.trim() },
+          { email: emailInputRaw, password: passwordInputRaw.trim() },
+          { email: emailInputRaw.toLowerCase(), password: passwordInputRaw },
+          { email: emailInputRaw, password: passwordInputRaw }
+        ];
+
+        // Deduplicate attempts
+        const uniqueAttempts = attempts.filter((v, i, a) => 
+          a.findIndex(t => t.email === v.email && t.password === v.password) === i
+        );
+
+        let lastError: any = null;
+        let loginSuccess = false;
+
+        for (const attempt of uniqueAttempts) {
+          try {
+            await signInWithEmailAndPassword(auth, attempt.email, attempt.password);
+            loginSuccess = true;
+            break;
+          } catch (err: any) {
+            lastError = err;
+          }
+        }
+
+        if (!loginSuccess && lastError) {
+          throw lastError;
+        }
       }
       setUsernameInput('');
       setPasswordInput('');
@@ -360,6 +393,28 @@ export default function App() {
         setAuthError('O provedor de login com E-mail/Senha está desabilitado no console do Firebase. Ative-o na aba Authentication -> Sign-in method.');
       } else {
         setAuthError(err.message || 'Erro ao realizar autenticação.');
+      }
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  // Action: Authenticate user using Google Login
+  const handleGoogleLogin = async () => {
+    setAuthError(null);
+    setAuthSuccessMessage(null);
+    try {
+      setIsAuthLoading(true);
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (err: any) {
+      console.error("Google Auth error:", err);
+      if (err.code === 'auth/popup-blocked') {
+        setAuthError('O pop-up de login foi bloqueado pelo seu navegador. Por favor, permita pop-ups para este site para fazer o login.');
+      } else if (err.code === 'auth/cancelled-popup-request') {
+        setAuthError('A autenticação com o Google foi cancelada antes de concluir.');
+      } else {
+        setAuthError(err.message || 'Erro ao realizar login com o Google.');
       }
     } finally {
       setIsAuthLoading(false);
@@ -854,6 +909,38 @@ export default function App() {
                 {isRegistering ? 'Cadastrar Minha Conta e Entrar' : 'Entrar no Sistema'}
               </button>
             </form>
+
+            <div className="flex items-center my-4">
+              <div className="grow border-t border-slate-200 dark:border-[#27272A]"></div>
+              <span className="mx-4 text-xs text-slate-400 font-bold uppercase tracking-wider">ou</span>
+              <div className="grow border-t border-slate-200 dark:border-[#27272A]"></div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              className="w-full py-3 bg-white dark:bg-[#18181B] hover:bg-slate-50 dark:hover:bg-[#27272A] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-[#27272A] font-bold text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 px-4 py-2.5 active:scale-[0.99] cursor-pointer"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                <path
+                  fill="#EA4335"
+                  d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.68 1.54 14.98 1 12 1 7.35 1 3.37 3.67 1.39 7.56l3.85 2.99c.9-2.69 3.42-4.51 6.76-4.51z"
+                />
+                <path
+                  fill="#4285F4"
+                  d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.51h6.43c-.28 1.44-1.09 2.67-2.31 3.49l3.58 2.78c2.09-1.93 3.79-4.77 3.79-8.42z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.24 10.55c-.23-.69-.36-1.43-.36-2.2 0-.77.13-1.51.36-2.2L1.39 3.16C.5 4.93 0 6.9 0 8.98c0 2.08.5 4.05 1.39 5.82l3.85-3.25z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.58-2.78c-.99.66-2.26 1.06-4.38 1.06-3.34 0-5.86-1.82-6.76-4.51L1.39 17.1C3.37 20.33 7.35 23 12 23z"
+                />
+              </svg>
+              {isRegistering ? 'Cadastrar-se com o Google' : 'Entrar com o Google'}
+            </button>
 
             <div className="mt-8 pt-6 border-t border-slate-200 dark:border-[#27272A] text-center">
               <button
