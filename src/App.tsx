@@ -4,7 +4,7 @@ import StatsBanner from './components/StatsBanner';
 import BoardFilters from './components/BoardFilters';
 import ColumnContainer from './components/ColumnContainer';
 import TaskModal from './components/TaskModal';
-import { auth, db, OperationType, handleFirestoreError } from './lib/firebase';
+import { auth, db, OperationType, handleFirestoreError, generateUUID } from './lib/firebase';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -269,9 +269,9 @@ export default function App() {
   const handlePasswordReset = async () => {
     setAuthError(null);
     setAuthSuccessMessage(null);
-    const email = usernameInput.trim();
+    const email = usernameInput.trim().toLowerCase();
     if (!email) {
-      setAuthError('Por favor, digite seu e-mail no campo "Nome de Usuário" para que possamos enviar o link de redefinição.');
+      setAuthError('Por favor, digite seu e-mail no campo "E-mail de Usuário" para que possamos enviar o link de redefinição.');
       return;
     }
     try {
@@ -298,11 +298,11 @@ export default function App() {
     setAuthError(null);
     setAuthSuccessMessage(null);
     
-    const email = usernameInput.trim();
-    const password = passwordInput.trim();
+    const email = usernameInput.trim().toLowerCase();
+    const password = passwordInput;
 
     if (!email || !password) {
-      setAuthError('Preencha seu nome de usuário (e-mail) e chave de acesso!');
+      setAuthError('Preencha seu e-mail de usuário e senha de acesso!');
       return;
     }
 
@@ -321,14 +321,42 @@ export default function App() {
       setUsernameInput('');
       setPasswordInput('');
     } catch (err: any) {
-      console.error(err);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setAuthError('E-mail ou senha incorretos. Se você já tem cadastro com este e-mail, por favor verifique os dados ou utilize o link "Esqueci minha senha" abaixo.');
-      } else if (err.code === 'auth/email-already-in-use') {
-        setAuthError('Este e-mail de usuário já está cadastrado. Se você não lembra sua senha, use a opção "Esqueci minha senha" abaixo para redefini-la.');
-      } else if (err.code === 'auth/invalid-email') {
-        setAuthError('O nome de usuário deve ser um e-mail válido (ex: seuemail@dominio.com).');
-      } else if (err.code === 'auth/operation-not-allowed') {
+      console.error("Auth error details:", err);
+      const errorCode = err.code || '';
+      const errorMessage = err.message || '';
+      
+      if (
+        errorCode === 'auth/user-not-found' || 
+        errorCode === 'auth/wrong-password' || 
+        errorCode === 'auth/invalid-credential' ||
+        errorMessage.includes('auth/invalid-credential') ||
+        errorMessage.includes('auth/wrong-password') ||
+        errorMessage.includes('auth/user-not-found') ||
+        errorMessage.includes('invalid-credential')
+      ) {
+        setAuthError('E-mail ou senha incorretos. Se você já tem cadastro com este e-mail, por favor verifique os dados ou redefina sua senha clicando no botão de redefinição abaixo.');
+      } else if (
+        errorCode === 'auth/email-already-in-use' || 
+        errorMessage.includes('auth/email-already-in-use') ||
+        errorMessage.includes('email-already-in-use')
+      ) {
+        setAuthError('Este e-mail de usuário já está cadastrado. Se você não lembra sua senha, use a opção abaixo para redefini-la.');
+      } else if (
+        errorCode === 'auth/invalid-email' || 
+        errorMessage.includes('auth/invalid-email') ||
+        errorMessage.includes('invalid-email')
+      ) {
+        setAuthError('O formato de e-mail do usuário informado parece inválido (ex: seuemail@dominio.com).');
+      } else if (
+        errorCode === 'auth/weak-password' || 
+        errorMessage.includes('auth/weak-password') ||
+        errorMessage.includes('weak-password')
+      ) {
+        setAuthError('A senha fornecida é muito fraca. Ela precisa ter pelo menos 6 caracteres.');
+      } else if (
+        errorCode === 'auth/operation-not-allowed' || 
+        errorMessage.includes('auth/operation-not-allowed')
+      ) {
         setAuthError('O provedor de login com E-mail/Senha está desabilitado no console do Firebase. Ative-o na aba Authentication -> Sign-in method.');
       } else {
         setAuthError(err.message || 'Erro ao realizar autenticação.');
@@ -365,7 +393,7 @@ export default function App() {
     }
 
     try {
-      const clientId = crypto.randomUUID();
+      const clientId = generateUUID();
       const clientData: Client = {
         id: clientId,
         userId: user!.id,
@@ -387,8 +415,21 @@ export default function App() {
       setNewClientPhone('');
       setNewClientProject('');
       setNewClientNotes('');
-    } catch (err) {
-      setClientError('Erro na sincronização de dados do cliente no Firebase.');
+    } catch (err: any) {
+      console.error(err);
+      // If we threw a custom JSON error, try to parse and display a readable message, otherwise display the message directly.
+      let displayMessage = 'Erro na sincronização de dados do cliente no Firebase.';
+      try {
+        if (err.message && err.message.startsWith('{')) {
+          const parsed = JSON.parse(err.message);
+          displayMessage = `Erro Firebase (${parsed.operationType} em ${parsed.path}): ${parsed.error}`;
+        } else {
+          displayMessage = err.message || String(err);
+        }
+      } catch (e) {
+        displayMessage = err.message || String(err);
+      }
+      setClientError(displayMessage);
     }
   };
 
@@ -431,7 +472,7 @@ export default function App() {
     if (!newColumnTitle.trim() || !user) return;
 
     try {
-      const columnId = `col_${crypto.randomUUID()}`;
+      const columnId = `col_${generateUUID()}`;
       const columnData: Column = {
         id: columnId,
         title: newColumnTitle.trim(),
@@ -541,7 +582,7 @@ export default function App() {
         setCards(prev => prev.map(c => c.id === cardData.id ? (payload as Card) : c));
       } else {
         // Creation Mode
-        const cardId = crypto.randomUUID();
+        const cardId = generateUUID();
         const payload: Card = {
           ...cardData,
           id: cardId,
@@ -737,9 +778,20 @@ export default function App() {
 
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               {authError && (
-                <div className="p-3.5 bg-red-50 dark:bg-red-950/45 border border-red-200 dark:border-red-900/60 rounded-xl flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{authError}</span>
+                <div className="p-3.5 bg-red-50 dark:bg-red-950/45 border border-red-200 dark:border-red-900/60 rounded-xl flex flex-col gap-2.5 text-xs text-red-600 dark:text-red-400">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
+                    <span className="leading-relaxed">{authError}</span>
+                  </div>
+                  {(authError.includes('cadastrado') || authError.includes('senha incorretos') || authError.includes('credencial') || authError.includes('credential') || authError.includes('incorretos')) && (
+                    <button
+                      type="button"
+                      onClick={handlePasswordReset}
+                      className="mt-1 self-start px-3 py-1.5 bg-red-100 hover:bg-red-200 dark:bg-[#1a0f12] dark:hover:bg-[#251317] text-red-700 dark:text-red-300 font-bold rounded-lg transition-all cursor-pointer text-[11px] border border-red-200/50 dark:border-red-900/30 active:scale-[0.98]"
+                    >
+                      Esqueceu ou quer redefinir a senha? Clique aqui para receber o link de recuperação por e-mail
+                    </button>
+                  )}
                 </div>
               )}
 
