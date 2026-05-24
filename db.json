@@ -1,0 +1,34 @@
+{
+  "users": [
+    {
+      "id": "84313079-e41e-4e2c-bc0a-33b86e8ee796",
+      "username": "joaoalexsanderro@gmail.com",
+      "passwordHash": "83b41efefefca66fb08140008cc9e07911a27882f3c24355af08d293da973f2c",
+      "createdAt": "2026-05-24T18:31:46.309Z"
+    }
+  ],
+  "cards": [],
+  "columns": [
+    {
+      "id": "todo",
+      "title": "A Fazer",
+      "userId": "84313079-e41e-4e2c-bc0a-33b86e8ee796"
+    },
+    {
+      "id": "in_progress",
+      "title": "Em Progresso",
+      "userId": "84313079-e41e-4e2c-bc0a-33b86e8ee796"
+    },
+    {
+      "id": "review",
+      "title": "Em Revisão",
+      "userId": "84313079-e41e-4e2c-bc0a-33b86e8ee796"
+    },
+    {
+      "id": "done",
+      "title": "Concluído",
+      "userId": "84313079-e41e-4e2c-bc0a-33b86e8ee796"
+    }
+  ],
+  "clients": []
+}

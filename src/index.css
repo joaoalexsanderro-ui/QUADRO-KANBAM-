@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+}
+
+/* Enable class-based dark mode in Tailwind v4 */
+@variant dark (&:where(.dark, .dark *));
+
+/* Custom scrollbar styling to match a high-quality sleek workspace layout */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.3);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.5);
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #0079bf; /* Iconic Trello Blue background */
+  color: #172b4d;
+  min-height: 100vh;
+  margin: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+body.dark {
+  background-color: #0f172a; /* Deep elegant slate for dark mode */
+  color: #f1f5f9;
+}
+

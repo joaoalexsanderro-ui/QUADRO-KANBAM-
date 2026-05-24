@@ -1,0 +1,6 @@
+{
+  "name": "Quadro Kanban",
+  "description": "Um sistema simples e funcional de controle de tarefas estilo Kanban inspirado no Trello, com cadastro de clientes, status, subtarefas e categorias.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

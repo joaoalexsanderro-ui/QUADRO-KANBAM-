@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quadro Kanban Corporativo</title>
+    <meta name="description" content="Quadro Kanban ágil corporativo com cadastro de clientes, subtarefas e indicadores" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#3B82F6" />
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/5038/5038435.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((reg) => console.log('Service Worker registrado com sucesso: ', reg.scope))
+            .catch((err) => console.log('Erro ao registrar Service Worker: ', err));
+        });
+      }
+    </script>
+  </body>
+</html>
+

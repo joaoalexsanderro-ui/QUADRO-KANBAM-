@@ -1,0 +1,22 @@
+{
+  "short_name": "Kanban",
+  "name": "Quadro Kanban Corporativo",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/5038/5038435.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/5038/5038435.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0A0A0C",
+  "theme_color": "#3B82F6",
+  "display": "standalone",
+  "orientation": "portrait"
+}
