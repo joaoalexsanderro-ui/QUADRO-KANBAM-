@@ -9,7 +9,8 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut, 
-  onAuthStateChanged 
+  onAuthStateChanged,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import { 
   collection, 
@@ -54,6 +55,7 @@ export default function App() {
   const [user, setUser] = useState<{ id: string; username: string } | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccessMessage, setAuthSuccessMessage] = useState<string | null>(null);
   
   // Auth form input state
   const [usernameInput, setUsernameInput] = useState('');
@@ -263,11 +265,43 @@ export default function App() {
     setShowInstallBtn(false);
   };
 
+  // Action: Reset user password in Firebase Auth via email link
+  const handlePasswordReset = async () => {
+    setAuthError(null);
+    setAuthSuccessMessage(null);
+    const email = usernameInput.trim();
+    if (!email) {
+      setAuthError('Por favor, digite seu e-mail no campo "Nome de Usuário" para que possamos enviar o link de redefinição.');
+      return;
+    }
+    try {
+      setIsAuthLoading(true);
+      await sendPasswordResetEmail(auth, email);
+      setAuthSuccessMessage(`E-mail de redefinição enviado para ${email}! Verifique sua caixa de entrada e filtro de spam.`);
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/invalid-email') {
+        setAuthError('O formato de e-mail fornecido é inválido.');
+      } else if (err.code === 'auth/user-not-found') {
+        setAuthError('Nenhum usuário correspondente a este e-mail foi encontrado em nosso sistema.');
+      } else {
+        setAuthError(err.message || 'Erro inesperado ao enviar e-mail de redefinição de senha.');
+      }
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
   // Action: Authenticate user login
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
-    if (!usernameInput || !passwordInput) {
+    setAuthSuccessMessage(null);
+    
+    const email = usernameInput.trim();
+    const password = passwordInput.trim();
+
+    if (!email || !password) {
       setAuthError('Preencha seu nome de usuário (e-mail) e chave de acesso!');
       return;
     }
@@ -275,23 +309,23 @@ export default function App() {
     try {
       setIsAuthLoading(true);
       if (isRegistering) {
-        if (passwordInput.length < 6) {
+        if (password.length < 6) {
           setAuthError('A senha precisa ter pelo menos 6 caracteres.');
           setIsAuthLoading(false);
           return;
         }
-        await createUserWithEmailAndPassword(auth, usernameInput, passwordInput);
+        await createUserWithEmailAndPassword(auth, email, password);
       } else {
-        await signInWithEmailAndPassword(auth, usernameInput, passwordInput);
+        await signInWithEmailAndPassword(auth, email, password);
       }
       setUsernameInput('');
       setPasswordInput('');
     } catch (err: any) {
       console.error(err);
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setAuthError('Usuário ou senha incorretos. (Nota: Se esta conta foi criada antes da mudança para o Firebase, você precisará registrá-la novamente clicando no link "Crie uma agora!" abaixo).');
+        setAuthError('E-mail ou senha incorretos. Se você já tem cadastro com este e-mail, por favor verifique os dados ou utilize o link "Esqueci minha senha" abaixo.');
       } else if (err.code === 'auth/email-already-in-use') {
-        setAuthError('Este e-mail de usuário já está cadastrado.');
+        setAuthError('Este e-mail de usuário já está cadastrado. Se você não lembra sua senha, use a opção "Esqueci minha senha" abaixo para redefini-la.');
       } else if (err.code === 'auth/invalid-email') {
         setAuthError('O nome de usuário deve ser um e-mail válido (ex: seuemail@dominio.com).');
       } else if (err.code === 'auth/operation-not-allowed') {
@@ -698,7 +732,7 @@ export default function App() {
             <p className="text-sm text-slate-500 dark:text-slate-400 mb-8">
               {isRegistering 
                 ? 'Inscreva-se gratuitamente para salvar e acessar de qualquer aparelho.' 
-                : 'Faça login com seu nome de usuário para acessar o quadro de trabalho.'}
+                : 'Faça login com seu e-mail de usuário para acessar o quadro de trabalho.'}
             </p>
 
             <form onSubmit={handleLoginSubmit} className="space-y-4">
@@ -709,27 +743,45 @@ export default function App() {
                 </div>
               )}
 
+              {authSuccessMessage && (
+                <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/45 border border-emerald-200 dark:border-emerald-900/60 rounded-xl flex items-start gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+                  <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-emerald-500 animate-bounce" />
+                  <span>{authSuccessMessage}</span>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Nome de Usuário
+                  E-mail de Usuário
                 </label>
                 <div className="relative">
                   <User className="absolute left-3 top-3.5 w-4.5 h-4.5 text-slate-400" />
                   <input
-                    type="text"
+                    type="email"
                     required
                     value={usernameInput}
                     onChange={e => setUsernameInput(e.target.value)}
-                    placeholder="Ex: jenefferson"
+                    placeholder="seuemail@exemplo.com"
                     className="w-full pl-10 pr-4 py-3 border border-slate-200 dark:border-[#27272A] rounded-xl text-sm bg-slate-50 dark:bg-[#18181B] text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#52525B] focus:outline-hidden focus:ring-1 focus:ring-blue-500 transition-colors"
                   />
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Senha de Acesso
-                </label>
+              <div className="space-y-1.5 font-sans">
+                <div className="flex justify-between items-center">
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Senha de Acesso
+                  </label>
+                  {!isRegistering && (
+                    <button
+                      type="button"
+                      onClick={handlePasswordReset}
+                      className="text-xs text-blue-500 hover:text-blue-600 font-bold hover:underline cursor-pointer"
+                    >
+                      Esqueci a senha
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
                   <Lock className="absolute left-3 top-3.5 w-4.5 h-4.5 text-slate-400" />
                   <input
@@ -737,7 +789,7 @@ export default function App() {
                     required
                     value={passwordInput}
                     onChange={e => setPasswordInput(e.target.value)}
-                    placeholder="Sua senha secreta..."
+                    placeholder={isRegistering ? "Mínimo 6 caracteres..." : "Sua senha secreta..."}
                     className="w-full pl-10 pr-4 py-3 border border-slate-200 dark:border-[#27272A] rounded-xl text-sm bg-slate-50 dark:bg-[#18181B] text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-[#52525B] focus:outline-hidden focus:ring-1 focus:ring-blue-500 transition-colors"
                   />
                 </div>
