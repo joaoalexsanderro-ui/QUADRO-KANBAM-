@@ -51,6 +51,24 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+const sortColumns = (cols: Column[]): Column[] => {
+  const getOrder = (col: Column) => {
+    const id = col.id.toLowerCase();
+    if (id.endsWith('_todo') || id === 'todo') return 1;
+    if (id.endsWith('_in_progress') || id === 'in_progress') return 2;
+    if (id.endsWith('_review') || id === 'review') return 3;
+    if (id.endsWith('_done') || id === 'done') return 4;
+    return 100; // Custom columns
+  };
+
+  return [...cols].sort((a, b) => {
+    const orderA = getOrder(a);
+    const orderB = getOrder(b);
+    if (orderA !== orderB) return orderA - orderB;
+    return a.title.localeCompare(b.title);
+  });
+};
+
 export default function App() {
   // Auth state
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('kanban_token'));
@@ -206,7 +224,7 @@ export default function App() {
           }
           fetchedCols = standardColumns;
         }
-        setColumns(fetchedCols);
+        setColumns(sortColumns(fetchedCols));
 
         // 2. Fetch Cards
         let cardsSnap;
@@ -538,7 +556,7 @@ export default function App() {
         handleFirestoreError(err, OperationType.CREATE, `columns/${columnId}`)
       );
 
-      setColumns(prev => [...prev, columnData]);
+      setColumns(prev => sortColumns([...prev, columnData]));
       setNewColumnTitle('');
       setIsCreatingColumn(false);
     } catch (err) {
@@ -553,7 +571,7 @@ export default function App() {
       await updateDoc(doc(db, 'columns', columnId), { title: newTitle.trim() }).catch((err) => 
         handleFirestoreError(err, OperationType.UPDATE, `columns/${columnId}`)
       );
-      setColumns(prev => prev.map(col => col.id === columnId ? { ...col, title: newTitle } : col));
+      setColumns(prev => sortColumns(prev.map(col => col.id === columnId ? { ...col, title: newTitle } : col)));
     } catch (err) {
       console.error('Falha ao renomear lista', err);
     }
