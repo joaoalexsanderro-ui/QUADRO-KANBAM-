@@ -227,9 +227,19 @@ export default function App() {
         body: JSON.stringify({ username: usernameInput, password: passwordInput })
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type');
+      let data;
+      if (contentType && contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        console.error('Server non-JSON response:', text);
+        setAuthError(`Erro do servidor (${response.status}): Servidor respondeu de forma inválida.`);
+        return;
+      }
+
       if (!response.ok) {
-        setAuthError(data.error || 'Erro ao realizar login, contate suporte.');
+        setAuthError(data.error || 'Erro ao realizar autenticação, tente novamente.');
         return;
       }
 
@@ -241,7 +251,7 @@ export default function App() {
       setUsernameInput('');
       setPasswordInput('');
     } catch (err) {
-      setAuthError('Houve um erro de rede. Verifique seu servidor Express.');
+      setAuthError('Houve um erro de rede ou o servidor Express está inacessível.');
     }
   };
 
