@@ -4,6 +4,23 @@ import StatsBanner from './components/StatsBanner';
 import BoardFilters from './components/BoardFilters';
 import ColumnContainer from './components/ColumnContainer';
 import TaskModal from './components/TaskModal';
+import { auth, db, OperationType, handleFirestoreError } from './lib/firebase';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  getDocs, 
+  setDoc, 
+  deleteDoc, 
+  updateDoc, 
+  query, 
+  where 
+} from 'firebase/firestore';
 
 import { 
   Trello, 
@@ -124,67 +141,103 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Auth bootstrap checking
+  // Auth bootstrap checking with Firebase Auth
   useEffect(() => {
-    async function checkSession() {
-      if (!token) {
-        setIsAuthLoading(false);
-        return;
-      }
-      try {
-        const response = await fetch('/api/auth/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        setToken(firebaseUser.uid);
+        setUser({
+          id: firebaseUser.uid,
+          username: firebaseUser.email || firebaseUser.uid
         });
-        if (response.ok) {
-          const data = await response.json();
-          setUser(data.user);
-        } else {
-          // Token expired or invalid
-          localStorage.removeItem('kanban_token');
-          setToken(null);
-        }
-      } catch (err) {
-        console.error('Falha de conexão com o painel principal', err);
-      } finally {
-        setIsAuthLoading(false);
+      } else {
+        localStorage.removeItem('kanban_token');
+        setToken(null);
+        setUser(null);
+        setColumns([]);
+        setCards([]);
+        setClients([]);
       }
-    }
-    checkSession();
-  }, [token]);
+      setIsAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  // Load app data from backend database when logged in
+  // Load app data from Firestore when user is authenticated
   useEffect(() => {
-    if (!user || !token) return;
+    if (!user) return;
 
     async function loadBoardData() {
       setIsDataLoading(true);
       try {
-        const headers = { 'Authorization': `Bearer ${token}` };
-        
-        const [resCols, resCards, resClients] = await Promise.all([
-          fetch('/api/columns', { headers }),
-          fetch('/api/cards', { headers }),
-          fetch('/api/clients', { headers })
-        ]);
+        const currentUserId = user.id;
 
-        if (resCols.ok && resCards.ok && resClients.ok) {
-          const dataCols = await resCols.json();
-          const dataCards = await resCards.json();
-          const dataClients = await resClients.json();
-
-          setColumns(dataCols);
-          setCards(dataCards);
-          setClients(dataClients);
+        // 1. Fetch & Seed Columns
+        let colSnap;
+        try {
+          const colRef = collection(db, 'columns');
+          const colQuery = query(colRef, where('userId', '==', currentUserId));
+          colSnap = await getDocs(colQuery);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, 'columns');
+          return;
         }
+        let fetchedCols = colSnap.docs.map(doc => doc.data() as Column);
+        
+        if (fetchedCols.length === 0) {
+          const standardColumns: Column[] = [
+            { id: `${currentUserId}_todo`, title: 'A Fazer' },
+            { id: `${currentUserId}_in_progress`, title: 'Em Progresso' },
+            { id: `${currentUserId}_review`, title: 'Em Revisão' },
+            { id: `${currentUserId}_done`, title: 'Concluído' }
+          ];
+          for (const docCol of standardColumns) {
+            const colDataWithUser = { ...docCol, userId: currentUserId };
+            try {
+              await setDoc(doc(db, 'columns', docCol.id), colDataWithUser);
+            } catch (err) {
+              handleFirestoreError(err, OperationType.CREATE, `columns/${docCol.id}`);
+            }
+          }
+          fetchedCols = standardColumns;
+        }
+        setColumns(fetchedCols);
+
+        // 2. Fetch Cards
+        let cardsSnap;
+        try {
+          const cardsRef = collection(db, 'cards');
+          const cardsQuery = query(cardsRef, where('userId', '==', currentUserId));
+          cardsSnap = await getDocs(cardsQuery);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, 'cards');
+          return;
+        }
+        const fetchedCards = cardsSnap.docs.map(doc => doc.data() as Card);
+        setCards(fetchedCards);
+
+        // 3. Fetch Clients
+        let clientsSnap;
+        try {
+          const clientsRef = collection(db, 'clients');
+          const clientsQuery = query(clientsRef, where('userId', '==', currentUserId));
+          clientsSnap = await getDocs(clientsQuery);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, 'clients');
+          return;
+        }
+        const fetchedClients = clientsSnap.docs.map(doc => doc.data() as Client);
+        setClients(fetchedClients);
+
       } catch (err) {
-        console.error('Falha ao carregar dados do banco de dados principal', err);
+        console.error('Falha ao carregar dados do Firebase', err);
       } finally {
         setIsDataLoading(false);
       }
     }
 
     loadBoardData();
-  }, [user, token]);
+  }, [user]);
 
   // Detect PWA Installation trigger
   useEffect(() => {
@@ -215,57 +268,48 @@ export default function App() {
     e.preventDefault();
     setAuthError(null);
     if (!usernameInput || !passwordInput) {
-      setAuthError('Preencha seu nome de usuário e chave de acesso!');
+      setAuthError('Preencha seu nome de usuário (e-mail) e chave de acesso!');
       return;
     }
 
     try {
-      const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: usernameInput, password: passwordInput })
-      });
-
-      const contentType = response.headers.get('content-type');
-      let data;
-      if (contentType && contentType.includes('application/json')) {
-        data = await response.json();
+      setIsAuthLoading(true);
+      if (isRegistering) {
+        if (passwordInput.length < 6) {
+          setAuthError('A senha precisa ter pelo menos 6 caracteres.');
+          setIsAuthLoading(false);
+          return;
+        }
+        await createUserWithEmailAndPassword(auth, usernameInput, passwordInput);
       } else {
-        const text = await response.text();
-        console.error('Server non-JSON response:', text);
-        setAuthError(`Erro do servidor (${response.status}): Servidor respondeu de forma inválida.`);
-        return;
+        await signInWithEmailAndPassword(auth, usernameInput, passwordInput);
       }
-
-      if (!response.ok) {
-        setAuthError(data.error || 'Erro ao realizar autenticação, tente novamente.');
-        return;
-      }
-
-      localStorage.setItem('kanban_token', data.token);
-      setToken(data.token);
-      setUser(data.user);
-      
-      // Reset variables
       setUsernameInput('');
       setPasswordInput('');
-    } catch (err) {
-      setAuthError('Houve um erro de rede ou o servidor Express está inacessível.');
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setAuthError('Usuário ou senha incorretos. (Nota: Se esta conta foi criada antes da mudança para o Firebase, você precisará registrá-la novamente clicando no link "Crie uma agora!" abaixo).');
+      } else if (err.code === 'auth/email-already-in-use') {
+        setAuthError('Este e-mail de usuário já está cadastrado.');
+      } else if (err.code === 'auth/invalid-email') {
+        setAuthError('O nome de usuário deve ser um e-mail válido (ex: seuemail@dominio.com).');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        setAuthError('O provedor de login com E-mail/Senha está desabilitado no console do Firebase. Ative-o na aba Authentication -> Sign-in method.');
+      } else {
+        setAuthError(err.message || 'Erro ao realizar autenticação.');
+      }
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
   // Action: Sign Out from active account
   const handleLogout = async () => {
-    if (token) {
-      try {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-      } catch (e) {
-        console.error('Logout request failed silently', e);
-      }
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error('Logout failed', e);
     }
     localStorage.removeItem('kanban_token');
     setToken(null);
@@ -287,35 +331,30 @@ export default function App() {
     }
 
     try {
-      const response = await fetch('/api/clients', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: newClientName.trim(),
-          email: newClientEmail.trim(),
-          phone: newClientPhone.trim(),
-          projectName: newClientProject.trim(),
-          notes: newClientNotes.trim()
-        })
-      });
+      const clientId = crypto.randomUUID();
+      const clientData: Client = {
+        id: clientId,
+        userId: user!.id,
+        name: newClientName.trim(),
+        email: newClientEmail.trim(),
+        phone: newClientPhone.trim(),
+        projectName: newClientProject.trim(),
+        notes: newClientNotes.trim(),
+        createdAt: new Date().toISOString()
+      };
 
-      const data = await response.json();
-      if (!response.ok) {
-        setClientError(data.error || 'Erro ao cadastrar novo cliente.');
-        return;
-      }
+      await setDoc(doc(db, 'clients', clientId), clientData).catch(err => 
+        handleFirestoreError(err, OperationType.CREATE, `clients/${clientId}`)
+      );
 
-      setClients(prev => [...prev, data]);
+      setClients(prev => [...prev, clientData]);
       setNewClientName('');
       setNewClientEmail('');
       setNewClientPhone('');
       setNewClientProject('');
       setNewClientNotes('');
     } catch (err) {
-      setClientError('Erro na sincronização de dados do cliente.');
+      setClientError('Erro na sincronização de dados do cliente no Firebase.');
     }
   };
 
@@ -326,17 +365,23 @@ export default function App() {
       `Deseja excluir o cliente "${clientName}"? Os cartões associados a ele ficarão desvinculados. Esta ação não poderá ser desfeita.`,
       async () => {
         try {
-          const response = await fetch(`/api/clients/${clientId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+          await deleteDoc(doc(db, 'clients', clientId)).catch(err => 
+            handleFirestoreError(err, OperationType.DELETE, `clients/${clientId}`)
+          );
+          
+          setClients(prev => prev.filter(c => c.id !== clientId));
+          // Unlink in local state cards and update in Firestore
+          setCards(prevCards => {
+            const updated = prevCards.map(c => 
+              c.clientId === clientId ? { ...c, clientId: undefined, clientName: '' } : c
+            );
+            prevCards.forEach(async (c) => {
+              if (c.clientId === clientId) {
+                await updateDoc(doc(db, 'cards', c.id), { clientId: null, clientName: '' }).catch(() => {});
+              }
+            });
+            return updated;
           });
-          if (response.ok) {
-            setClients(prev => prev.filter(c => c.id !== clientId));
-            // Unlink in local state cards
-            setCards(prevCards => prevCards.map(c => 
-              c.clientId === clientId ? { ...c, clientId: undefined } : c
-            ));
-          }
         } catch (err) {
           console.error('Falha ao apagar cliente', err);
         }
@@ -349,24 +394,23 @@ export default function App() {
   // Action: Submit dynamic column creation to API
   const handleAddColumnSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newColumnTitle.trim() || !token) return;
+    if (!newColumnTitle.trim() || !user) return;
 
     try {
-      const response = await fetch('/api/columns', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ title: newColumnTitle.trim() })
-      });
+      const columnId = `col_${crypto.randomUUID()}`;
+      const columnData: Column = {
+        id: columnId,
+        title: newColumnTitle.trim(),
+        userId: user.id
+      };
 
-      if (response.ok) {
-        const data = await response.json();
-        setColumns(prev => [...prev, data]);
-        setNewColumnTitle('');
-        setIsCreatingColumn(false);
-      }
+      await setDoc(doc(db, 'columns', columnId), columnData).catch(err => 
+        handleFirestoreError(err, OperationType.CREATE, `columns/${columnId}`)
+      );
+
+      setColumns(prev => [...prev, columnData]);
+      setNewColumnTitle('');
+      setIsCreatingColumn(false);
     } catch (err) {
       console.error('Falha ao adicionar lista', err);
     }
@@ -374,19 +418,12 @@ export default function App() {
 
   // Action: Rename custom columns in API
   const handleRenameColumn = async (columnId: string, newTitle: string) => {
-    if (!token) return;
+    if (!user) return;
     try {
-      const response = await fetch(`/api/columns/${columnId}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ title: newTitle.trim() })
-      });
-      if (response.ok) {
-        setColumns(prev => prev.map(col => col.id === columnId ? { ...col, title: newTitle } : col));
-      }
+      await updateDoc(doc(db, 'columns', columnId), { title: newTitle.trim() }).catch((err) => 
+        handleFirestoreError(err, OperationType.UPDATE, `columns/${columnId}`)
+      );
+      setColumns(prev => prev.map(col => col.id === columnId ? { ...col, title: newTitle } : col));
     } catch (err) {
       console.error('Falha ao renomear lista', err);
     }
@@ -394,7 +431,7 @@ export default function App() {
 
   // Action: Delete custom columns in API
   const handleDeleteColumn = async (columnId: string) => {
-    if (!token) return;
+    if (!user) return;
     const associatedCards = cards.filter(card => card.columnId === columnId);
     
     if (associatedCards.length > 0) {
@@ -403,14 +440,19 @@ export default function App() {
         `Esta coluna contém ${associatedCards.length} cartão(ões). \nPara excluí-la, TODOS esses cartões serão excluídos permanentemente de seu painel.`,
         async () => {
           try {
-            const response = await fetch(`/api/columns/${columnId}`, {
-              method: 'DELETE',
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (response.ok) {
-              setColumns(prev => prev.filter(col => col.id !== columnId));
-              setCards(prev => prev.filter(card => card.columnId !== columnId));
+            await deleteDoc(doc(db, 'columns', columnId)).catch((err) => 
+              handleFirestoreError(err, OperationType.DELETE, `columns/${columnId}`)
+            );
+            
+            // Delete associated cards from Firestore securely
+            for (const card of associatedCards) {
+              await deleteDoc(doc(db, 'cards', card.id)).catch((err) => 
+                handleFirestoreError(err, OperationType.DELETE, `cards/${card.id}`)
+              );
             }
+
+            setColumns(prev => prev.filter(col => col.id !== columnId));
+            setCards(prev => prev.filter(card => card.columnId !== columnId));
           } catch (err) {
             console.error('Erro de exclusão de servidor', err);
           }
@@ -424,14 +466,10 @@ export default function App() {
         'Deseja realmente excluir esta coluna?',
         async () => {
           try {
-            const response = await fetch(`/api/columns/${columnId}`, {
-              method: 'DELETE',
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (response.ok) {
-              setColumns(prev => prev.filter(col => col.id !== columnId));
-              setCards(prev => prev.filter(card => card.columnId !== columnId));
-            }
+            await deleteDoc(doc(db, 'columns', columnId)).catch((err) => 
+              handleFirestoreError(err, OperationType.DELETE, `columns/${columnId}`)
+            );
+            setColumns(prev => prev.filter(col => col.id !== columnId));
           } catch (err) {
             console.error('Erro de exclusão de servidor', err);
           }
@@ -444,7 +482,7 @@ export default function App() {
 
   // Action: Save, Edit or Create task card in API backend
   const handleSaveCard = async (cardData: Omit<Card, 'id' | 'createdAt'> & { id?: string }) => {
-    if (!token) return;
+    if (!user) return;
 
     // Resolve real client name matching selection details
     let actualClientName = cardData.clientName || '';
@@ -455,40 +493,32 @@ export default function App() {
       }
     }
 
-    const payload = {
-      ...cardData,
-      clientName: actualClientName
-    };
-
     try {
       if (cardData.id) {
         // Edit Mode
-        const response = await fetch(`/api/cards/${cardData.id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-        if (response.ok) {
-          const updated = await response.json();
-          setCards(prev => prev.map(c => c.id === updated.id ? updated : c));
-        }
+        const payload = {
+          ...cardData,
+          clientName: actualClientName,
+          userId: user.id
+        };
+        await setDoc(doc(db, 'cards', cardData.id), payload).catch((err) => 
+          handleFirestoreError(err, OperationType.UPDATE, `cards/${cardData.id}`)
+        );
+        setCards(prev => prev.map(c => c.id === cardData.id ? (payload as Card) : c));
       } else {
         // Creation Mode
-        const response = await fetch('/api/cards', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-        if (response.ok) {
-          const created = await response.json();
-          setCards(prev => [...prev, created]);
-        }
+        const cardId = crypto.randomUUID();
+        const payload: Card = {
+          ...cardData,
+          id: cardId,
+          clientName: actualClientName,
+          userId: user.id,
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'cards', cardId), payload).catch((err) => 
+          handleFirestoreError(err, OperationType.CREATE, `cards/${cardId}`)
+        );
+        setCards(prev => [...prev, payload]);
       }
     } catch (err) {
       console.error('Falha de sincronização de cartão', err);
@@ -498,7 +528,7 @@ export default function App() {
 
   // Action: Delete task card from DB
   const handleDeleteCard = async (cardId: string) => {
-    if (!token) return;
+    if (!user) return;
     const cardToDelete = cards.find(c => c.id === cardId);
     const confirmMessage = cardToDelete 
       ? `Deseja realmente excluir o cartão "${cardToDelete.title}"?`
@@ -509,13 +539,10 @@ export default function App() {
       confirmMessage,
       async () => {
         try {
-          const response = await fetch(`/api/cards/${cardId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (response.ok) {
-            setCards(prev => prev.filter(c => c.id !== cardId));
-          }
+          await deleteDoc(doc(db, 'cards', cardId)).catch((err) => 
+            handleFirestoreError(err, OperationType.DELETE, `cards/${cardId}`)
+          );
+          setCards(prev => prev.filter(c => c.id !== cardId));
         } catch (err) {
           console.error('Erro de exclusão de cartão', err);
         }
@@ -527,20 +554,12 @@ export default function App() {
 
   // Action: Drag or move card inside column lane updates
   const handleMoveCardColumn = async (cardId: string, targetColumnId: string) => {
-    if (!token) return;
+    if (!user) return;
     try {
-      const response = await fetch(`/api/cards/${cardId}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ columnId: targetColumnId })
-      });
-      if (response.ok) {
-        const updated = await response.json();
-        setCards(prev => prev.map(c => c.id === cardId ? { ...c, columnId: targetColumnId } : c));
-      }
+      await updateDoc(doc(db, 'cards', cardId), { columnId: targetColumnId }).catch((err) => 
+        handleFirestoreError(err, OperationType.UPDATE, `cards/${cardId}`)
+      );
+      setCards(prev => prev.map(c => c.id === cardId ? { ...c, columnId: targetColumnId } : c));
     } catch (err) {
       console.error('Falha ao mover coluna', err);
     }
@@ -548,25 +567,17 @@ export default function App() {
 
   // Action: Toggle Play / Pause state on Kanban task card
   const handleTogglePause = async (cardId: string) => {
-    if (!token) return;
+    if (!user) return;
     const targetCard = cards.find(c => c.id === cardId);
     if (!targetCard) return;
 
     try {
-      const response = await fetch(`/api/cards/${cardId}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ isPaused: !targetCard.isPaused })
-      });
-
-      if (response.ok) {
-        setCards(prev => prev.map(c => 
-          c.id === cardId ? { ...c, isPaused: !c.isPaused } : c
-        ));
-      }
+      await updateDoc(doc(db, 'cards', cardId), { isPaused: !targetCard.isPaused }).catch((err) => 
+        handleFirestoreError(err, OperationType.UPDATE, `cards/${cardId}`)
+      );
+      setCards(prev => prev.map(c => 
+        c.id === cardId ? { ...c, isPaused: !c.isPaused } : c
+      ));
     } catch (err) {
       console.error('Falha ao pausar/retomar tarefa', err);
     }

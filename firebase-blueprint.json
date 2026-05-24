@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "Subtask": {
+      "title": "Subtask",
+      "description": "A subtask under a main task card",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "completed": { "type": "boolean" }
+      },
+      "required": ["id", "title", "completed"]
+    },
+    "Card": {
+      "title": "Card",
+      "description": "A board card representing a task or activity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "clientName": { "type": "string" },
+        "clientId": { "type": "string" },
+        "description": { "type": "string" },
+        "subtasks": { "type": "array" },
+        "priority": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "labels": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "columnId": { "type": "string" },
+        "isPaused": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "title", "clientName", "description", "createdAt", "columnId"]
+    },
+    "Column": {
+      "title": "Column",
+      "description": "A lane/column on the Kanban board",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "title", "userId"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "A registered client in the Kanban system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "projectName": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "name", "email", "phone", "createdAt"]
+    }
+  },
+  "firestore": {
+    "columns/{columnId}": {
+      "schema": "Column",
+      "description": "Kanban columns belonging to a user"
+    },
+    "cards/{cardId}": {
+      "schema": "Card",
+      "description": "Task cards belonging to a user"
+    },
+    "clients/{clientId}": {
+      "schema": "Client",
+      "description": "Clients belonging to a user"
+    }
+  }
+}

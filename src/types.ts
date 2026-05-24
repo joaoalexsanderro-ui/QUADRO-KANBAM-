@@ -25,6 +25,7 @@ export interface Card {
 export interface Column {
   id: string;
   title: string;
+  userId?: string;
 }
 
 export interface Client {
